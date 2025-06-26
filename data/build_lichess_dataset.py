@@ -2,14 +2,14 @@
 Download Lichess puzzles, extract Mate-in-2 rows, sort by rating, and save.
 """
 
+import argparse
 import requests
 from pathlib import Path
 import zstandard as zstd
 import pandas as pd
 from tqdm.auto import tqdm
 
-SCRIPT_DIR  = Path(__file__).resolve().parent
-DATA_DIR = SCRIPT_DIR.parent / "data"
+DATA_DIR  = Path(__file__).resolve().parent 
 RAW_ZST  = DATA_DIR / "lichess_db_puzzle.csv.zst"
 RAW_CSV  = DATA_DIR / "lichess_puzzles_raw.csv"
 OUT_CSV  = DATA_DIR / "mate_in_2_fen_by_rating.csv"
@@ -42,6 +42,18 @@ def decompress_zst(src: Path, dst: Path) -> None:
             fout.write(chunk)
             bar.update(len(chunk))
 
+def build_mate1(src_csv: Path, out_csv: Path) -> None:
+    """Filter Mate-in-1 puzzles and sort by rating."""
+    print("[*] Loading CSV …")
+    df = pd.read_csv(src_csv, usecols=COLS,
+                     dtype={"FEN": "string", "Rating": "Int32", "Themes": "string"})
+
+    mate2 = df[df["Themes"].str.contains("mateIn1")].copy()
+    print(f"[+] Found {len(mate2):,} mate-in-1 puzzles")
+
+    mate2.sort_values("Rating")[["FEN", "Rating"]].to_csv(out_csv, index=False)
+    print(f"[✓] Wrote {out_csv}")
+
 def build_mate2(src_csv: Path, out_csv: Path) -> None:
     """Filter Mate-in-2 puzzles and sort by rating."""
     print("[*] Loading CSV …")
@@ -62,10 +74,25 @@ def remove(path: Path):
         pass
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Build Mate-in-N dataset from Lichess dump.")
+    parser.add_argument("--theme", required=True,
+                        choices=["m1", "m2"],
+                        help="Puzzle theme to filter (mate-in-1 or mate-in-2)")
+    parser.add_argument("--out", required=True,
+                        help="Output CSV file path (including filename)")
+    args = parser.parse_args()
+
+    # download and decompress
     download(LICHESS_DUMP_URL, RAW_ZST)
     decompress_zst(RAW_ZST, RAW_CSV)
-    build_mate2(RAW_CSV, OUT_CSV)
 
-    # clear intermediate artifacts
+    # build dataset based on theme
+    out_csv = Path(args.out)
+    if args.theme == "mateIn1":
+        build_mate1(RAW_CSV, out_csv)
+    else:
+        build_mate2(RAW_CSV, out_csv)
+
+    # clean up intermediate artifacts
     remove(RAW_ZST)
     remove(RAW_CSV)
